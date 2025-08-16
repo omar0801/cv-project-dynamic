@@ -1,0 +1,37 @@
+[
+  {
+    "id": "1",
+    "path": "modules/projects/gdpr_obfuscator.tex",
+    "name": "GDPR Obfuscator"
+  },
+  {
+    "id": "2",
+    "path": "modules/projects/neural_normalisers.tex",
+    "name": "Neural Normalisers"
+  },
+  {
+    "id": "3",
+    "path": "modules/projects/image_processing.tex",
+    "name": "Image Processing"
+  },
+  {
+    "id": "4",
+    "path": "modules/projects/pipeline_inspection.tex",
+    "name": "Pipeline Inspection"
+  },
+  {
+    "id": "5",
+    "path": "modules/projects/conversational_ai.tex",
+    "name": "Conversational AI"
+  },
+  {
+    "id": "6",
+    "path": "modules/projects/alu4.tex",
+    "name": "ALU4"
+  },
+  {
+    "id": "7",
+    "path": "modules/projects/line_following_robot.tex",
+    "name": "Line Following Robot"
+  }
+]
