@@ -11,3 +11,4 @@ jobs/
 *.synctex.gz
 __pycache__/
 *.spec
+venv312
