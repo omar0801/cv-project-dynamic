@@ -88,16 +88,6 @@ def ensure_unique_folder(base: Path) -> Path:
 # 2) LaTeX HELPERS (escape, patchers, compile)
 # =========================
 
-def ensure_local_resume_class(cv_path: str):
-    r"""Force \documentclass{resume} so TEXINPUTS picks up base/resume.cls."""
-    try:
-        text = Path(cv_path).read_text(encoding='utf-8')
-        text2 = re.sub(r'\\documentclass\s*\{[^\}]*resume[^\}]*\}', r'\\documentclass{resume}', text)
-        if text2 != text:
-            Path(cv_path).write_text(text2, encoding='utf-8')
-    except Exception:
-        pass
-
 def rewrite_module_inputs_to_absolute(tex_path: str):
     r"""Rewrite \input{...modules/...} and \includegraphics{...modules/...} to absolute paths.
     Keeps LaTeX happy when compiling from jobs/<company>/<role>/.
@@ -311,7 +301,7 @@ def create_cv_for(role_title, company_name, job_link):
 
     try:
         shutil.copy(str(template_path), str(destination_file))
-        ensure_local_resume_class(str(destination_file))
+        # ensure_local_resume_class(str(destination_file))
         rewrite_module_inputs_to_absolute(str(destination_file))
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare CV files:\n{e}")
