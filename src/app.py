@@ -211,6 +211,23 @@ def open_folder(path):
     except Exception:
         pass
 
+# ---- Small viewer for LaTeX log tail ----
+def show_log_excerpt(log_path: str, parent):
+    try:
+        txt = Path(log_path).read_text(encoding="utf-8", errors="ignore")
+        tail = "\n".join(txt.splitlines()[-150:])
+    except Exception as e:
+        tail = f"Could not read log: {e}"
+    win = tk.Toplevel(parent)
+    win.title("LaTeX log")
+    win.geometry("900x600")
+    t = tk.Text(win, wrap="none")
+    t.pack(fill="both", expand=True)
+    t.insert("1.0", tail)
+    t.configure(state="disabled")
+    ttk.Button(win, text="Open full log", command=lambda: open_pdf_viewer(log_path)).pack(anchor="e", padx=8, pady=8)
+
+
 def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
     tex_dir = os.path.dirname(tex_file_path)
     base_name = os.path.splitext(os.path.basename(tex_file_path))[0]
@@ -231,12 +248,12 @@ def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
             clean_latex_junk(tex_file_path, keep_log=False)
         if open_pdf:
             open_pdf_viewer(pdf_path)
-        return True, None
+        return True, None, log_path
     except Exception as e:
         if clean_files:
             clean_latex_junk(tex_file_path, keep_log=True)
         hint = f"{e} — check log: {log_path}"
-        return False, hint
+        return False, hint, log_path
 
 
 # =========================
@@ -318,7 +335,7 @@ def create_cv_for(role_title, company_name, job_link):
 
 # Fill summary + projects, optionally compile
 
-def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt, clean_opt, open_opt, id_to_path, is_raw_summary: bool):
+def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt, clean_opt, open_opt, id_to_path, is_raw_summary: bool, ui_parent=None):
     try:
         lines = read_file(cv_path)
     except FileNotFoundError:
@@ -360,9 +377,11 @@ def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt
     write_file(cv_path, new_lines)
 
     if compile_opt:
-        ok, err = compile_latex(cv_path, open_pdf=False, clean_files=clean_opt)
+        ok, err, log_path = compile_latex(cv_path, open_pdf=False, clean_files=clean_opt)
         if not ok:
-            messagebox.showerror("Compile failed", f"LaTeX compilation failed:\n{err or 'Unknown error'}")
+            if messagebox.askyesno("Compile failed", f"LaTeX compilation failed.\n\n{err}\n\nOpen log?"):
+                parent = ui_parent or tk._get_default_root()
+                show_log_excerpt(log_path, parent)
             return False
 
     return True
@@ -384,7 +403,7 @@ def create_cover_letter_for(job_folder: str):
         messagebox.showerror("Error", f"Could not prepare cover letter file:\n{e}")
         return None
 
-def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt: bool, clean_opt: bool, open_opt: bool):
+def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt: bool, clean_opt: bool, open_opt: bool, ui_parent=None):
     try:
         lines = read_file(cl_tex_path)
     except FileNotFoundError:
@@ -409,9 +428,11 @@ def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt
     write_file(cl_tex_path, new_lines)
 
     if compile_opt:
-        ok, err = compile_latex(cl_tex_path, open_pdf=False, clean_files=clean_opt)
+        ok, err, log_path = compile_latex(cl_tex_path, open_pdf=False, clean_files=clean_opt)
         if not ok:
-            messagebox.showerror("Compile failed", f"Cover letter LaTeX compilation failed:\n{err or 'Unknown error'}")
+            if messagebox.askyesno("Compile failed", f"Cover letter LaTeX compilation failed.\n\n{err}\n\nOpen log?"):
+                parent = ui_parent or tk._get_default_root()
+                show_log_excerpt(log_path, parent)
             return False
 
     return True
@@ -622,9 +643,6 @@ def run_app():
         variable=raw_summary_var
     ).grid(row=3, column=1, sticky="w", pady=(0, 0))
 
-
-
-
     # Summary (row 4)
     ttk.Label(form, text="Summary:").grid(row=4, column=0, sticky="ne", padx=(0, 8), pady=4)
     summary_outer = ttk.Frame(form)
@@ -777,7 +795,8 @@ def run_app():
                     job_folder, cv_path, summary, selected_ids,
                     compile_var.get(), clean_var.get(), False,
                     id_to_path,
-                    raw_summary_var.get()   # <--- passes the toggle state
+                    raw_summary_var.get(),   # <--- passes the toggle state
+                    ui_parent=root
                 )
                 if not ok:
                     return
@@ -790,6 +809,7 @@ def run_app():
                         return
                     ok2 = customise_cover_letter_content(
                         cl_path, cl_body, cl_compile_var.get(), clean_var.get(), False,
+                        ui_parent=root
                     )
                     if not ok2:
                         return
