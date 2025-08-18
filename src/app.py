@@ -10,8 +10,6 @@ import tkinter.font as tkFont
 from tkinter import ttk, messagebox
 from pathlib import Path
 import json
-
-# External theme
 import sv_ttk
 
 # Optional preview deps (install: pip install pymupdf pillow)
@@ -320,7 +318,7 @@ def create_cv_for(role_title, company_name, job_link):
 
 # Fill summary + projects, optionally compile
 
-def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt, clean_opt, open_opt, id_to_path):
+def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt, clean_opt, open_opt, id_to_path, is_raw_summary: bool):
     try:
         lines = read_file(cv_path)
     except FileNotFoundError:
@@ -347,7 +345,8 @@ def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt
         messagebox.showerror("Missing project files", f"Missing entries: {', '.join(missing)}")
         return False
 
-    escaped_summary = latex_escape(summary.strip())
+    raw = summary.strip()
+    escaped_summary = raw if is_raw_summary else latex_escape(raw)
 
     new_lines = []
     for line in lines:
@@ -477,7 +476,7 @@ def build_side_preview(root):
         panel._img_refs.clear()
 
         if not path or not os.path.exists(path):
-            ttk.Label(inner, text="No PDF to show yet.").pack(pady=12)
+            ttk.Label(inner, text="No PDF to show yet.").pack(side="top", anchor="w", padx=6, pady=(6, 6))
             _update_scroll_region()
             return
 
@@ -597,8 +596,9 @@ def run_app():
     form.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=8, pady=(8, 4))
     form.columnconfigure(0, weight=0)
     form.columnconfigure(1, weight=1)
-    form.rowconfigure(3, weight=1)  # summary (shifted up)
-    form.rowconfigure(4, weight=1)  # projects (shifted up)
+    form.rowconfigure(4, weight=1)  # summary
+    form.rowconfigure(5, weight=1)  # projects
+
 
     # Company (row 0)
     ttk.Label(form, text="Company:").grid(row=0, column=0, sticky="e", padx=(0, 8), pady=4)
@@ -614,11 +614,18 @@ def run_app():
     ttk.Label(form, text="Job Link:").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
     job_link_entry = ttk.Entry(form, width=40)
     job_link_entry.grid(row=2, column=1, sticky="we", pady=4)
+    # --- Raw LaTeX toggle (above Summary) ---
+    raw_summary_var = tk.BooleanVar(value=False)
+    ttk.Checkbutton(
+        form,
+        text="Insert raw LaTeX in summary",
+        variable=raw_summary_var
+    ).grid(row=3, column=1, sticky="w", pady=(0, 0))
 
-    # Summary (row 3)
-    ttk.Label(form, text="Summary:").grid(row=3, column=0, sticky="ne", padx=(0, 8), pady=4)
+    # Summary (row 4)
+    ttk.Label(form, text="Summary:").grid(row=4, column=0, sticky="ne", padx=(0, 8), pady=4)
     summary_outer = ttk.Frame(form)
-    summary_outer.grid(row=3, column=1, sticky="nsew", pady=4)
+    summary_outer.grid(row=4, column=1, sticky="nsew", pady=4)
 
     summary_frame = ttk.Frame(summary_outer)
     summary_frame.pack(side="top", fill="both", expand=True)
@@ -636,10 +643,10 @@ def run_app():
         n = len(summary_text.get("1.0", "end-1c"))
         counter_var.set(f"{n} chars")
 
-    # Projects listbox (row 4)
-    ttk.Label(form, text="Projects:").grid(row=4, column=0, sticky="ne", padx=(0, 8), pady=4)
+    # Projects listbox (row 5)
+    ttk.Label(form, text="Projects:").grid(row=5, column=0, sticky="ne", padx=(0, 8), pady=4)
     proj_frame = ttk.Frame(form)
-    proj_frame.grid(row=4, column=1, sticky="nsew", pady=4)
+    proj_frame.grid(row=5, column=1, sticky="nsew", pady=4)
 
     project_listbox = tk.Listbox(proj_frame, selectmode=tk.MULTIPLE, width=28, height=7)
     project_listbox.pack(side="left", fill="both", expand=True)
@@ -727,6 +734,7 @@ def run_app():
         cl_text.delete("1.0", tk.END)
         update_count()
         update_cl_count()
+        raw_summary_var.set(False)
 
     def on_generate(_evt=None):
         role_title = role_entry.get().strip()
@@ -765,7 +773,8 @@ def run_app():
                 ok = customise_cv_content(
                     job_folder, cv_path, summary, selected_ids,
                     compile_var.get(), clean_var.get(), False,
-                    id_to_path
+                    id_to_path,
+                    raw_summary_var.get()   # <--- passes the toggle state
                 )
                 if not ok:
                     return
