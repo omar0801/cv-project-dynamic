@@ -20,11 +20,18 @@ except Exception:
     fitz = None
     Image = ImageTk = None
 
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES  # type: ignore
+except Exception:
+    TkinterDnD = None
+    DND_FILES = None
+
 """
 CV/CL Builder GUI (single-template version)
 - Creates per-job folders: jobs/<company>/<role[_n]>/
 - Copies LaTeX templates and injects summary + selected projects
 - (Optional) compiles and shows a right‑side PDF preview
+- NEW: Drag-and-drop .tex project files into the Projects list to add them on the fly.
 
 Main sections
 1) Paths & template resolution
@@ -212,6 +219,7 @@ def open_folder(path):
         pass
 
 # ---- Small viewer for LaTeX log tail ----
+
 def show_log_excerpt(log_path: str, parent):
     try:
         txt = Path(log_path).read_text(encoding="utf-8", errors="ignore")
@@ -316,7 +324,6 @@ def create_cv_for(role_title, company_name, job_link):
 
     try:
         shutil.copy(str(template_path), str(destination_file))
-        # ensure_local_resume_class(str(destination_file))
         rewrite_module_inputs_to_absolute(str(destination_file))
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare CV files:\n{e}")
@@ -583,11 +590,40 @@ def build_side_preview(root):
 
 
 # =========================
-# 5) GUI WIRING
+# 5) GUI WIRING (with drag-and-drop for .tex projects)
 # =========================
 
+def _parse_dnd_file_list(data: str) -> list[str]:
+    """Parse DND_FILES payload into a list of paths (handles braces/quotes)."""
+    if not data:
+        return []
+    parts = []
+    buf = ''
+    in_brace = False
+    for ch in data:
+        if ch == '{':
+            in_brace = True
+            buf = ''
+        elif ch == '}':
+            in_brace = False
+            parts.append(buf)
+            buf = ''
+        elif ch == ' ' and not in_brace:
+            if buf:
+                parts.append(buf)
+                buf = ''
+        else:
+            buf += ch
+    if buf:
+        parts.append(buf)
+    return parts
+
 def run_app():
-    root = tk.Tk()
+    # Use TkinterDnD if available for native drag-and-drop
+    if TkinterDnD is not None:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     root.title("")
 
     # Dark theme + base typography
@@ -620,7 +656,6 @@ def run_app():
     form.rowconfigure(4, weight=1)  # summary
     form.rowconfigure(5, weight=1)  # projects
 
-
     # Company (row 0)
     ttk.Label(form, text="Company:").grid(row=0, column=0, sticky="e", padx=(0, 8), pady=4)
     company_entry = ttk.Entry(form, width=40)
@@ -635,6 +670,7 @@ def run_app():
     ttk.Label(form, text="Job Link:").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
     job_link_entry = ttk.Entry(form, width=40)
     job_link_entry.grid(row=2, column=1, sticky="we", pady=4)
+
     # --- Raw LaTeX toggle (above Summary) ---
     raw_summary_var = tk.BooleanVar(value=False)
     ttk.Checkbutton(
@@ -664,20 +700,79 @@ def run_app():
         n = len(summary_text.get("1.0", "end-1c"))
         counter_var.set(f"{n} chars")
 
-    # Projects listbox (row 5)
+    # Projects list (row 5)
     ttk.Label(form, text="Projects:").grid(row=5, column=0, sticky="ne", padx=(0, 8), pady=4)
-    proj_frame = ttk.Frame(form)
-    proj_frame.grid(row=5, column=1, sticky="nsew", pady=4)
 
-    project_listbox = tk.Listbox(proj_frame, selectmode=tk.MULTIPLE, width=28, height=7)
+    # Outer container with grid so the button can sit below the list
+    proj_outer = ttk.Frame(form)
+    proj_outer.grid(row=5, column=1, sticky="nsew", pady=4)
+    proj_outer.columnconfigure(0, weight=1)
+    proj_outer.rowconfigure(0, weight=1)
+
+    # Drop zone header (top)
+    drop_hdr = ttk.Label(proj_outer, text=("Drag .tex files here" if TkinterDnD else "Add .tex with button (DnD addon not installed)"), anchor="w")
+    drop_hdr.grid(row=0, column=0, sticky="we", pady=(0, 4))
+
+    # List+scrollbar frame
+    list_frame = ttk.Frame(proj_outer)
+    list_frame.grid(row=1, column=0, sticky="nsew")
+    list_frame.columnconfigure(0, weight=1)
+
+    project_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, width=28, height=7)
     project_listbox.pack(side="left", fill="both", expand=True)
-    project_listbox.configure(font=("Segoe UI", 11))
-    proj_scroll = ttk.Scrollbar(proj_frame, command=project_listbox.yview)
+    proj_scroll = ttk.Scrollbar(list_frame, command=project_listbox.yview)
     proj_scroll.pack(side="right", fill="y")
-    project_listbox.config(yscrollcommand=proj_scroll.set)
+    project_listbox.config(yscrollcommand=proj_scroll.set, font=("Segoe UI", 11))
 
+    # Button below list (row 2)
+    def _add_files_dialog():
+        from tkinter import filedialog
+        files = filedialog.askopenfilenames(title="Select .tex project files", filetypes=[("TeX files", "*.tex")])
+        add_project_paths(list(files))
+
+    add_btn = ttk.Button(proj_outer, text="Add .tex files…", command=_add_files_dialog)
+    add_btn.grid(row=2, column=0, sticky="w", pady=(6, 0))
+
+    # Populate list
     for p in projects:
         project_listbox.insert(tk.END, f"{p['id']} - {p['name']}")
+
+    # Helper to add new project paths dynamically
+    def add_project_paths(paths: list[str]):
+        nonlocal projects, id_to_path
+        added = 0
+        for pth in paths:
+            p = Path(pth).resolve()
+            if not p.exists() or p.suffix.lower() != '.tex':
+                continue
+            # Avoid duplicates by absolute path
+            if any(Path(x['path']).resolve() == p for x in projects):
+                continue
+            pid = str(len(projects) + 1)
+            name = p.stem.replace('_', ' ').title()
+            rec = {'id': pid, 'name': name, 'path': str(p)}
+            projects.append(rec)
+            id_to_path[pid] = str(p)
+            project_listbox.insert(tk.END, f"{pid} - {name}")
+            added += 1
+        if added:
+            messagebox.showinfo("Projects", f"Added {added} project(s).")
+
+    # DnD bindings if available
+    if TkinterDnD and DND_FILES:
+        def _on_enter(_e):
+            project_listbox.configure(highlightthickness=2, highlightbackground="#5cb85c")
+        def _on_leave(_e):
+            project_listbox.configure(highlightthickness=0)
+        project_listbox.drop_target_register(DND_FILES)
+        project_listbox.dnd_bind('<<DropEnter>>', _on_enter)
+        project_listbox.dnd_bind('<<DropLeave>>', _on_leave)
+        def _on_drop(e):
+            project_listbox.configure(highlightthickness=0)
+            paths = _parse_dnd_file_list(e.data)
+            add_project_paths(paths)
+            return 'break'
+        project_listbox.dnd_bind('<<Drop>>', _on_drop)
 
     # CV options
     compile_var = tk.BooleanVar(value=True)
@@ -795,7 +890,7 @@ def run_app():
                     job_folder, cv_path, summary, selected_ids,
                     compile_var.get(), clean_var.get(), False,
                     id_to_path,
-                    raw_summary_var.get(),   # <--- passes the toggle state
+                    raw_summary_var.get(),
                     ui_parent=root
                 )
                 if not ok:
