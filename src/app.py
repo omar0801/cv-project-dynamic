@@ -622,6 +622,9 @@ def run_app():
         variable=raw_summary_var
     ).grid(row=3, column=1, sticky="w", pady=(0, 0))
 
+
+
+
     # Summary (row 4)
     ttk.Label(form, text="Summary:").grid(row=4, column=0, sticky="ne", padx=(0, 8), pady=4)
     summary_outer = ttk.Frame(form)
