@@ -31,7 +31,7 @@ CV/CL Builder GUI (single-template version)
 - Creates per-job folders: jobs/<company>/<role[_n]>/
 - Copies LaTeX templates and injects summary + selected projects
 - (Optional) compiles and shows a right‑side PDF preview
-- NEW: Drag-and-drop .tex project files into the Projects list to add them on the fly.
+-  Drag-and-drop .tex project files into the Projects list to add them on the fly.
 
 Main sections
 1) Paths & template resolution
@@ -618,6 +618,38 @@ def _parse_dnd_file_list(data: str) -> list[str]:
         parts.append(buf)
     return parts
 
+# ---- ensure we can write into modules/projects and copy files there ----
+
+def _ensure_projects_dir_writable() -> Path | None:
+    dest = RPATH('modules', 'projects')
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        test = dest / '.__write_test__'
+        test.write_text('ok', encoding='utf-8')
+        test.unlink(missing_ok=True)
+        return dest
+    except Exception as e:
+        messagebox.showerror("Projects folder not writable",
+                             f"Cannot write to {dest}.\nReason: {e}\n\nIf you're running a packaged build, run from source or choose a writable location.")
+        return None
+
+def _copy_tex_into_projects(src: Path) -> Path | None:
+    dest_dir = _ensure_projects_dir_writable()
+    if not dest_dir:
+        return None
+    base = sanitize_name(src.stem) or 'project'
+    dest = dest_dir / f"{base}.tex"
+    n = 1
+    while dest.exists():
+        dest = dest_dir / f"{base}_{n}.tex"
+        n += 1
+    try:
+        shutil.copy2(src, dest)
+        return dest
+    except Exception as e:
+        messagebox.showerror("Copy failed", f"Could not copy {src} -> {dest}:\n{e}")
+        return None
+
 def run_app():
     # Use TkinterDnD if available for native drag-and-drop
     if TkinterDnD is not None:
@@ -710,7 +742,7 @@ def run_app():
     proj_outer.rowconfigure(0, weight=1)
 
     # Drop zone header (top)
-    drop_hdr = ttk.Label(proj_outer, text=("Drag .tex files here" if TkinterDnD else "Add .tex with button (DnD addon not installed)"), anchor="w")
+    drop_hdr = ttk.Label(proj_outer, text=("Drag .tex files here (will copy to modules/projects)" if TkinterDnD else "Add .tex with button (DnD addon not installed)"), anchor="w")
     drop_hdr.grid(row=0, column=0, sticky="we", pady=(0, 4))
 
     # List+scrollbar frame
@@ -724,39 +756,46 @@ def run_app():
     proj_scroll.pack(side="right", fill="y")
     project_listbox.config(yscrollcommand=proj_scroll.set, font=("Segoe UI", 11))
 
-    # Button below list (row 2)
+    # Populate list
+    for p in projects:
+        project_listbox.insert(tk.END, f"{p['id']} - {p['name']}")
+
+    # Helper to add new project paths dynamically (COPY into modules/projects)
+    def add_project_paths(paths: list[str]):
+        nonlocal projects, id_to_path
+        dest_dir = _ensure_projects_dir_writable()
+        if not dest_dir:
+            return
+        added = 0
+        for pth in paths:
+            src = Path(pth).resolve()
+            if not src.exists() or src.suffix.lower() != '.tex':
+                continue
+            dest = _copy_tex_into_projects(src)
+            if not dest:
+                continue
+            # Avoid duplicates by absolute path
+            if any(Path(x['path']).resolve() == dest.resolve() for x in projects):
+                continue
+            pid = str(len(projects) + 1)
+            name = dest.stem.replace('_', ' ').title()
+            rec = {'id': pid, 'name': name, 'path': str(dest.resolve())}
+            projects.append(rec)
+            id_to_path[pid] = str(dest.resolve())
+            project_listbox.insert(tk.END, f"{pid} - {name}")
+            added += 1
+        if added:
+            messagebox.showinfo("Projects", f"Copied & added {added} project(s) to modules/projects.")
+
+    # Fallback: add files button
     def _add_files_dialog():
         from tkinter import filedialog
         files = filedialog.askopenfilenames(title="Select .tex project files", filetypes=[("TeX files", "*.tex")])
         add_project_paths(list(files))
 
+    # Button below list (row 2)
     add_btn = ttk.Button(proj_outer, text="Add .tex files…", command=_add_files_dialog)
     add_btn.grid(row=2, column=0, sticky="w", pady=(6, 0))
-
-    # Populate list
-    for p in projects:
-        project_listbox.insert(tk.END, f"{p['id']} - {p['name']}")
-
-    # Helper to add new project paths dynamically
-    def add_project_paths(paths: list[str]):
-        nonlocal projects, id_to_path
-        added = 0
-        for pth in paths:
-            p = Path(pth).resolve()
-            if not p.exists() or p.suffix.lower() != '.tex':
-                continue
-            # Avoid duplicates by absolute path
-            if any(Path(x['path']).resolve() == p for x in projects):
-                continue
-            pid = str(len(projects) + 1)
-            name = p.stem.replace('_', ' ').title()
-            rec = {'id': pid, 'name': name, 'path': str(p)}
-            projects.append(rec)
-            id_to_path[pid] = str(p)
-            project_listbox.insert(tk.END, f"{pid} - {name}")
-            added += 1
-        if added:
-            messagebox.showinfo("Projects", f"Added {added} project(s).")
 
     # DnD bindings if available
     if TkinterDnD and DND_FILES:
