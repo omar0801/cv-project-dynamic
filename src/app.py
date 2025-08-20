@@ -452,7 +452,7 @@ def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt
 def build_side_preview(root):
     """Right-side PDF preview with CV/CL selector, zoom (Ctrl+Wheel),
     and vertical/horizontal scrolling."""
-    root.columnconfigure(3, weight=0, minsize=600)
+    root.columnconfigure(3, weight=0, minsize=780)
 
     panel = ttk.Labelframe(root, text="Preview", padding=8)
     panel.grid(row=1, column=3, rowspan=10, sticky="nsew", padx=(4, 8), pady=8)
@@ -484,7 +484,7 @@ def build_side_preview(root):
 
     # State
     panel._img_refs = []
-    panel._current_zoom = 1.4
+    panel._current_zoom = 1.2
     panel._min_zoom = 0.6
     panel._max_zoom = 3.0
     panel._zoom_step = 0.1
@@ -718,7 +718,7 @@ def run_app():
 
     summary_frame = ttk.Frame(summary_outer)
     summary_frame.pack(side="top", fill="both", expand=True)
-    summary_text = tk.Text(summary_frame, width=80, height=8, wrap="word")
+    summary_text = tk.Text(summary_frame, width=80, height=6, wrap="word")
     summary_text.pack(side="left", fill="both", expand=True)
     summary_scroll = ttk.Scrollbar(summary_frame, command=summary_text.yview)
     summary_scroll.pack(side="right", fill="y")
@@ -750,7 +750,7 @@ def run_app():
     list_frame.grid(row=1, column=0, sticky="nsew")
     list_frame.columnconfigure(0, weight=1)
 
-    project_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, width=28, height=7)
+    project_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, width=28, height=5)
     project_listbox.pack(side="left", fill="both", expand=True)
     proj_scroll = ttk.Scrollbar(list_frame, command=project_listbox.yview)
     proj_scroll.pack(side="right", fill="y")
