@@ -490,6 +490,10 @@ def build_side_preview(root):
     panel._zoom_step = 0.1
     panel._current_path = None
 
+    # --- Scroll speed knobs ---
+    panel._scroll_units_v = 2 
+    panel._scroll_units_h = 2
+
     def _update_scroll_region(_evt=None):
         bbox = canvas.bbox("all")
         if bbox:
@@ -538,9 +542,20 @@ def build_side_preview(root):
         path = getattr(root, "last_cv_pdf", None) if choice == "cv" else getattr(root, "last_cl_pdf", None)
         panel._current_path = path
         render_pdf(path)
+    
+    def _is_over_preview():
+        x, y = root.winfo_pointerx(), root.winfo_pointery()
+        w = root.winfo_containing(x, y)
+        while w is not None:
+            if w is panel or w is canvas or w is inner:
+                return True
+            w = getattr(w, "master", None)
+        return False
 
     # Interactions
     def _on_ctrl_wheel(event):
+        if not _is_over_preview():
+            return  # let the focused widget use Ctrl+Wheel
         direction = 1 if event.delta > 0 else -1
         new_zoom = panel._current_zoom + direction * panel._zoom_step
         new_zoom = max(panel._min_zoom, min(panel._max_zoom, new_zoom))
@@ -548,31 +563,34 @@ def build_side_preview(root):
             render_pdf(panel._current_path, new_zoom)
         return "break"
 
+    def _normalize_ticks(delta: int) -> float:
+        # Windows/Linux: multiples of 120; macOS: ±1 typically
+        if delta == 0:
+            return 0.0
+        return (delta / 120.0) if abs(delta) >= 120 else float(delta)
+
     def _on_wheel(event):
-        if event.state & 0x0004:  # Ctrl handled above
-            return "break"
-        delta = int(-1*(event.delta/120)*30) if event.delta else 0
-        canvas.yview_scroll(delta, "units")
+        if event.state & 0x0004:
+            return  # Ctrl+Wheel is handled above
+        if not _is_over_preview():
+            return  # do not scroll preview when pointer is elsewhere
+        ticks = _normalize_ticks(event.delta)
+        units = int(-ticks * panel._scroll_units_v)
+        canvas.yview_scroll(units, "units")
         return "break"
 
     def _on_shift_wheel(event):
-        delta = int(-1*(event.delta/120)*30) if event.delta else 0
-        canvas.xview_scroll(delta, "units")
-        return "break"
-
-    def _on_btn4(_e):
-        canvas.yview_scroll(-3, "units")
-        return "break"
-
-    def _on_btn5(_e):
-        canvas.yview_scroll(3, "units")
+        if not _is_over_preview():
+            return
+        ticks = _normalize_ticks(event.delta)
+        units = int(-ticks * panel._scroll_units_h)
+        canvas.xview_scroll(units, "units")
         return "break"
 
     canvas.bind_all("<Control-MouseWheel>", _on_ctrl_wheel)
     canvas.bind_all("<MouseWheel>", _on_wheel)
     canvas.bind_all("<Shift-MouseWheel>", _on_shift_wheel)
-    canvas.bind_all("<Button-4>", _on_btn4)
-    canvas.bind_all("<Button-5>", _on_btn5)
+
 
     def _reset_zoom(_evt=None):
         if panel._current_path:
@@ -722,7 +740,7 @@ def run_app():
     summary_text.pack(side="left", fill="both", expand=True)
     summary_scroll = ttk.Scrollbar(summary_frame, command=summary_text.yview)
     summary_scroll.pack(side="right", fill="y")
-    summary_text.config(font=("Segoe UI", 11), yscrollcommand=summary_scroll.set)
+    summary_text.config(font=("Segoe UI", 11), yscrollcommand=summary_scroll.set, exportselection=False)
 
     counter_var = tk.StringVar(value="0 chars")
     counter_label = ttk.Label(summary_outer, textvariable=counter_var, anchor="e")
@@ -750,7 +768,7 @@ def run_app():
     list_frame.grid(row=1, column=0, sticky="nsew")
     list_frame.columnconfigure(0, weight=1)
 
-    project_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, width=28, height=5)
+    project_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, width=28, height=5, exportselection=False)
     project_listbox.pack(side="left", fill="both", expand=True)
     proj_scroll = ttk.Scrollbar(list_frame, command=project_listbox.yview)
     proj_scroll.pack(side="right", fill="y")
