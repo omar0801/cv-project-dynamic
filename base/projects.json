@@ -1,9 +1,3 @@
 [
-  { "path": "modules/projects/gdpr_obfuscator.tex", "name": "GDPR Obfuscator" },
-  { "path": "modules/projects/neural_normalisers.tex", "name": "Neural Normalisers" },
-  { "path": "modules/projects/image_processing.tex", "name": "Image Processing" },
-  { "path": "modules/projects/pipeline_inspection.tex", "name": "Pipeline Inspection" },
-  { "path": "modules/projects/conversational_ai.tex", "name": "Conversational AI" },
-  { "path": "modules/projects/alu4.tex", "name": "ALU4" },
-  { "path": "modules/projects/line_following_robot.tex", "name": "Line Following Robot" }
+  { "path": "modules/projects/template_project.tex", "name": "Template Project" }
 ]
