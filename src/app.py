@@ -12,6 +12,11 @@ from pathlib import Path
 import json
 import sv_ttk
 
+# =========================
+# USER-CONFIGURABLE: change this and run the app
+# =========================
+CANDIDATE_NAME = "Patrica Wong"  # The name to write into \name{...} and filenames
+
 # Optional preview deps (install: pip install pymupdf pillow)
 try:
     import fitz  # PyMuPDF
@@ -20,11 +25,18 @@ except Exception:
     fitz = None
     Image = ImageTk = None
 
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES  # type: ignore
+except Exception:
+    TkinterDnD = None
+    DND_FILES = None
+
 """
 CV/CL Builder GUI (single-template version)
 - Creates per-job folders: jobs/<company>/<role[_n]>/
 - Copies LaTeX templates and injects summary + selected projects
 - (Optional) compiles and shows a right‑side PDF preview
+- Drag-and-drop .tex project files into the Projects list to add them on the fly.
 
 Main sections
 1) Paths & template resolution
@@ -82,13 +94,22 @@ def ensure_unique_folder(base: Path) -> Path:
         n += 1
 
 
+def filename_prefix_from_name(full_name: str) -> str:
+    """Return something like Last_First (letters only) for filenames."""
+    parts = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]+", full_name)
+    if not parts:
+        return "Candidate"
+    first = parts[0].title()
+    last = parts[-1].title()
+    return f"{last}_{first}"
+
 # =========================
 # 2) LaTeX HELPERS (escape, patchers, compile)
 # =========================
 
 def rewrite_module_inputs_to_absolute(tex_path: str):
     r"""Rewrite \input{...modules/...} and \includegraphics{...modules/...} to absolute paths.
-    Keeps LaTeX happy when compiling from jobs/<company>/<role>/.
+    Keeps LaTeX happy when compiling from jobs/<company>/<role/>.
     """
     def absify(rel: str) -> str:
         rel_path = Path(rel).as_posix()
@@ -125,6 +146,28 @@ LATEX_SPECIALS = {
 
 def latex_escape(text):
     return "".join(LATEX_SPECIALS.get(ch, ch) for ch in text)
+
+def patch_cv_candidate_name(cv_path: str, full_name: str):
+    """Replace the first \name{...} occurrence with the candidate's name.
+    Uses a callable replacement so Python doesn't interpret backslashes
+    like "\n" as a newline.
+    """
+    try:
+        s = Path(cv_path).read_text(encoding='utf-8')
+    except Exception:
+        return
+    escaped = latex_escape(full_name.strip()) if full_name else "Candidate"
+    pattern = r"\\name\s*\{[^{}]*\}"
+
+    def _repl(_m):
+        return chr(92) + "name{" + escaped + "}"
+
+    new_s, n = re.subn(pattern, _repl, s, count=1)
+    if n:
+        try:
+            Path(cv_path).write_text(new_s, encoding='utf-8')
+        except Exception:
+            pass
 
 # File IO
 
@@ -211,6 +254,24 @@ def open_folder(path):
     except Exception:
         pass
 
+# ---- Small viewer for LaTeX log tail ----
+
+def show_log_excerpt(log_path: str, parent):
+    try:
+        txt = Path(log_path).read_text(encoding="utf-8", errors="ignore")
+        tail = "\n".join(txt.splitlines()[-150:])
+    except Exception as e:
+        tail = f"Could not read log: {e}"
+    win = tk.Toplevel(parent)
+    win.title("LaTeX log")
+    win.geometry("900x600")
+    t = tk.Text(win, wrap="none")
+    t.pack(fill="both", expand=True)
+    t.insert("1.0", tail)
+    t.configure(state="disabled")
+    ttk.Button(win, text="Open full log", command=lambda: open_pdf_viewer(log_path)).pack(anchor="e", padx=8, pady=8)
+
+
 def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
     tex_dir = os.path.dirname(tex_file_path)
     base_name = os.path.splitext(os.path.basename(tex_file_path))[0]
@@ -231,12 +292,12 @@ def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
             clean_latex_junk(tex_file_path, keep_log=False)
         if open_pdf:
             open_pdf_viewer(pdf_path)
-        return True, None
+        return True, None, log_path
     except Exception as e:
         if clean_files:
             clean_latex_junk(tex_file_path, keep_log=True)
         hint = f"{e} — check log: {log_path}"
-        return False, hint
+        return False, hint, log_path
 
 
 # =========================
@@ -295,12 +356,13 @@ def create_cv_for(role_title, company_name, job_link):
     job_folder = ensure_unique_folder(base_folder)
     job_folder.mkdir(parents=True, exist_ok=True)
 
-    destination_file = job_folder / "Barouni_Omar_CV.tex"
+    prefix = filename_prefix_from_name(CANDIDATE_NAME)
+    destination_file = job_folder / f"{prefix}_CV.tex"
 
     try:
         shutil.copy(str(template_path), str(destination_file))
-        # ensure_local_resume_class(str(destination_file))
         rewrite_module_inputs_to_absolute(str(destination_file))
+        patch_cv_candidate_name(str(destination_file), CANDIDATE_NAME)
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare CV files:\n{e}")
         return None, None
@@ -318,7 +380,7 @@ def create_cv_for(role_title, company_name, job_link):
 
 # Fill summary + projects, optionally compile
 
-def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt, clean_opt, open_opt, id_to_path, is_raw_summary: bool):
+def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt, clean_opt, open_opt, id_to_path, is_raw_summary: bool, ui_parent=None):
     try:
         lines = read_file(cv_path)
     except FileNotFoundError:
@@ -360,9 +422,11 @@ def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt
     write_file(cv_path, new_lines)
 
     if compile_opt:
-        ok, err = compile_latex(cv_path, open_pdf=False, clean_files=clean_opt)
+        ok, err, log_path = compile_latex(cv_path, open_pdf=False, clean_files=clean_opt)
         if not ok:
-            messagebox.showerror("Compile failed", f"LaTeX compilation failed:\n{err or 'Unknown error'}")
+            if messagebox.askyesno("Compile failed", f"LaTeX compilation failed.\n\n{err}\n\nOpen log?"):
+                parent = ui_parent or tk._get_default_root()
+                show_log_excerpt(log_path, parent)
             return False
 
     return True
@@ -375,16 +439,18 @@ def create_cover_letter_for(job_folder: str):
         messagebox.showerror("Error", "No cover letter template found at base/cover_letter.tex.")
         return None
 
-    dest = Path(job_folder) / "Barouni_Omar_Cover_Letter.tex"
+    prefix = filename_prefix_from_name(CANDIDATE_NAME)
+    dest = Path(job_folder) / f"{prefix}_Cover_Letter.tex"
     try:
         shutil.copy(str(tpl), str(dest))
         rewrite_module_inputs_to_absolute(str(dest))
+        patch_cv_candidate_name(str(dest), CANDIDATE_NAME)
         return str(dest)
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare cover letter file:\n{e}")
         return None
 
-def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt: bool, clean_opt: bool, open_opt: bool):
+def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt: bool, clean_opt: bool, open_opt: bool, ui_parent=None):
     try:
         lines = read_file(cl_tex_path)
     except FileNotFoundError:
@@ -409,9 +475,11 @@ def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt
     write_file(cl_tex_path, new_lines)
 
     if compile_opt:
-        ok, err = compile_latex(cl_tex_path, open_pdf=False, clean_files=clean_opt)
+        ok, err, log_path = compile_latex(cl_tex_path, open_pdf=False, clean_files=clean_opt)
         if not ok:
-            messagebox.showerror("Compile failed", f"Cover letter LaTeX compilation failed:\n{err or 'Unknown error'}")
+            if messagebox.askyesno("Compile failed", f"Cover letter LaTeX compilation failed.\n\n{err}\n\nOpen log?"):
+                parent = ui_parent or tk._get_default_root()
+                show_log_excerpt(log_path, parent)
             return False
 
     return True
@@ -424,7 +492,7 @@ def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt
 def build_side_preview(root):
     """Right-side PDF preview with CV/CL selector, zoom (Ctrl+Wheel),
     and vertical/horizontal scrolling."""
-    root.columnconfigure(3, weight=0, minsize=600)
+    root.columnconfigure(3, weight=0, minsize=780)
 
     panel = ttk.Labelframe(root, text="Preview", padding=8)
     panel.grid(row=1, column=3, rowspan=10, sticky="nsew", padx=(4, 8), pady=8)
@@ -456,11 +524,15 @@ def build_side_preview(root):
 
     # State
     panel._img_refs = []
-    panel._current_zoom = 1.4
+    panel._current_zoom = 1.2
     panel._min_zoom = 0.6
     panel._max_zoom = 3.0
     panel._zoom_step = 0.1
     panel._current_path = None
+
+    # --- Scroll speed knobs ---
+    panel._scroll_units_v = 2 
+    panel._scroll_units_h = 2
 
     def _update_scroll_region(_evt=None):
         bbox = canvas.bbox("all")
@@ -510,9 +582,20 @@ def build_side_preview(root):
         path = getattr(root, "last_cv_pdf", None) if choice == "cv" else getattr(root, "last_cl_pdf", None)
         panel._current_path = path
         render_pdf(path)
+    
+    def _is_over_preview():
+        x, y = root.winfo_pointerx(), root.winfo_pointery()
+        w = root.winfo_containing(x, y)
+        while w is not None:
+            if w is panel or w is canvas or w is inner:
+                return True
+            w = getattr(w, "master", None)
+        return False
 
     # Interactions
     def _on_ctrl_wheel(event):
+        if not _is_over_preview():
+            return  # let the focused widget use Ctrl+Wheel
         direction = 1 if event.delta > 0 else -1
         new_zoom = panel._current_zoom + direction * panel._zoom_step
         new_zoom = max(panel._min_zoom, min(panel._max_zoom, new_zoom))
@@ -520,31 +603,34 @@ def build_side_preview(root):
             render_pdf(panel._current_path, new_zoom)
         return "break"
 
+    def _normalize_ticks(delta: int) -> float:
+        # Windows/Linux: multiples of 120; macOS: ±1 typically
+        if delta == 0:
+            return 0.0
+        return (delta / 120.0) if abs(delta) >= 120 else float(delta)
+
     def _on_wheel(event):
-        if event.state & 0x0004:  # Ctrl handled above
-            return "break"
-        delta = int(-1*(event.delta/120)*30) if event.delta else 0
-        canvas.yview_scroll(delta, "units")
+        if event.state & 0x0004:
+            return  # Ctrl+Wheel is handled above
+        if not _is_over_preview():
+            return  # do not scroll preview when pointer is elsewhere
+        ticks = _normalize_ticks(event.delta)
+        units = int(-ticks * panel._scroll_units_v)
+        canvas.yview_scroll(units, "units")
         return "break"
 
     def _on_shift_wheel(event):
-        delta = int(-1*(event.delta/120)*30) if event.delta else 0
-        canvas.xview_scroll(delta, "units")
-        return "break"
-
-    def _on_btn4(_e):
-        canvas.yview_scroll(-3, "units")
-        return "break"
-
-    def _on_btn5(_e):
-        canvas.yview_scroll(3, "units")
+        if not _is_over_preview():
+            return
+        ticks = _normalize_ticks(event.delta)
+        units = int(-ticks * panel._scroll_units_h)
+        canvas.xview_scroll(units, "units")
         return "break"
 
     canvas.bind_all("<Control-MouseWheel>", _on_ctrl_wheel)
     canvas.bind_all("<MouseWheel>", _on_wheel)
     canvas.bind_all("<Shift-MouseWheel>", _on_shift_wheel)
-    canvas.bind_all("<Button-4>", _on_btn4)
-    canvas.bind_all("<Button-5>", _on_btn5)
+
 
     def _reset_zoom(_evt=None):
         if panel._current_path:
@@ -562,11 +648,72 @@ def build_side_preview(root):
 
 
 # =========================
-# 5) GUI WIRING
+# 5) GUI WIRING (with drag-and-drop for .tex projects)
 # =========================
 
+def _parse_dnd_file_list(data: str) -> list[str]:
+    """Parse DND_FILES payload into a list of paths (handles braces/quotes)."""
+    if not data:
+        return []
+    parts = []
+    buf = ''
+    in_brace = False
+    for ch in data:
+        if ch == '{':
+            in_brace = True
+            buf = ''
+        elif ch == '}':
+            in_brace = False
+            parts.append(buf)
+            buf = ''
+        elif ch == ' ' and not in_brace:
+            if buf:
+                parts.append(buf)
+                buf = ''
+        else:
+            buf += ch
+    if buf:
+        parts.append(buf)
+    return parts
+
+# ---- ensure we can write into modules/projects and copy files there ----
+
+def _ensure_projects_dir_writable() -> Path | None:
+    dest = RPATH('modules', 'projects')
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        test = dest / '.__write_test__'
+        test.write_text('ok', encoding='utf-8')
+        test.unlink(missing_ok=True)
+        return dest
+    except Exception as e:
+        messagebox.showerror("Projects folder not writable",
+                             f"Cannot write to {dest}.\nReason: {e}\n\nIf you're running a packaged build, run from source or choose a writable location.")
+        return None
+
+def _copy_tex_into_projects(src: Path) -> Path | None:
+    dest_dir = _ensure_projects_dir_writable()
+    if not dest_dir:
+        return None
+    base = sanitize_name(src.stem) or 'project'
+    dest = dest_dir / f"{base}.tex"
+    n = 1
+    while dest.exists():
+        dest = dest_dir / f"{base}_{n}.tex"
+        n += 1
+    try:
+        shutil.copy2(src, dest)
+        return dest
+    except Exception as e:
+        messagebox.showerror("Copy failed", f"Could not copy {src} -> {dest}:\n{e}")
+        return None
+
 def run_app():
-    root = tk.Tk()
+    # Use TkinterDnD if available for native drag-and-drop
+    if TkinterDnD is not None:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     root.title("")
 
     # Dark theme + base typography
@@ -599,7 +746,6 @@ def run_app():
     form.rowconfigure(4, weight=1)  # summary
     form.rowconfigure(5, weight=1)  # projects
 
-
     # Company (row 0)
     ttk.Label(form, text="Company:").grid(row=0, column=0, sticky="e", padx=(0, 8), pady=4)
     company_entry = ttk.Entry(form, width=40)
@@ -614,6 +760,7 @@ def run_app():
     ttk.Label(form, text="Job Link:").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=4)
     job_link_entry = ttk.Entry(form, width=40)
     job_link_entry.grid(row=2, column=1, sticky="we", pady=4)
+
     # --- Raw LaTeX toggle (above Summary) ---
     raw_summary_var = tk.BooleanVar(value=False)
     ttk.Checkbutton(
@@ -629,11 +776,11 @@ def run_app():
 
     summary_frame = ttk.Frame(summary_outer)
     summary_frame.pack(side="top", fill="both", expand=True)
-    summary_text = tk.Text(summary_frame, width=80, height=8, wrap="word")
+    summary_text = tk.Text(summary_frame, width=80, height=6, wrap="word")
     summary_text.pack(side="left", fill="both", expand=True)
     summary_scroll = ttk.Scrollbar(summary_frame, command=summary_text.yview)
     summary_scroll.pack(side="right", fill="y")
-    summary_text.config(font=("Segoe UI", 11), yscrollcommand=summary_scroll.set)
+    summary_text.config(font=("Segoe UI", 11), yscrollcommand=summary_scroll.set, exportselection=False)
 
     counter_var = tk.StringVar(value="0 chars")
     counter_label = ttk.Label(summary_outer, textvariable=counter_var, anchor="e")
@@ -643,20 +790,86 @@ def run_app():
         n = len(summary_text.get("1.0", "end-1c"))
         counter_var.set(f"{n} chars")
 
-    # Projects listbox (row 5)
+    # Projects list (row 5)
     ttk.Label(form, text="Projects:").grid(row=5, column=0, sticky="ne", padx=(0, 8), pady=4)
-    proj_frame = ttk.Frame(form)
-    proj_frame.grid(row=5, column=1, sticky="nsew", pady=4)
 
-    project_listbox = tk.Listbox(proj_frame, selectmode=tk.MULTIPLE, width=28, height=7)
+    # Outer container with grid so the button can sit below the list
+    proj_outer = ttk.Frame(form)
+    proj_outer.grid(row=5, column=1, sticky="nsew", pady=4)
+    proj_outer.columnconfigure(0, weight=1)
+    proj_outer.rowconfigure(0, weight=1)
+
+    # Drop zone header (top)
+    drop_hdr = ttk.Label(proj_outer, text=("Drag .tex files here (will copy to modules/projects)" if TkinterDnD else "Add .tex with button (DnD addon not installed)"), anchor="w")
+    drop_hdr.grid(row=0, column=0, sticky="we", pady=(0, 4))
+
+    # List+scrollbar frame
+    list_frame = ttk.Frame(proj_outer)
+    list_frame.grid(row=1, column=0, sticky="nsew")
+    list_frame.columnconfigure(0, weight=1)
+
+    project_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, width=28, height=5, exportselection=False)
     project_listbox.pack(side="left", fill="both", expand=True)
-    project_listbox.configure(font=("Segoe UI", 11))
-    proj_scroll = ttk.Scrollbar(proj_frame, command=project_listbox.yview)
+    proj_scroll = ttk.Scrollbar(list_frame, command=project_listbox.yview)
     proj_scroll.pack(side="right", fill="y")
-    project_listbox.config(yscrollcommand=proj_scroll.set)
+    project_listbox.config(yscrollcommand=proj_scroll.set, font=("Segoe UI", 11))
 
+    # Populate list
     for p in projects:
         project_listbox.insert(tk.END, f"{p['id']} - {p['name']}")
+
+    # Helper to add new project paths dynamically (COPY into modules/projects)
+    def add_project_paths(paths: list[str]):
+        nonlocal projects, id_to_path
+        dest_dir = _ensure_projects_dir_writable()
+        if not dest_dir:
+            return
+        added = 0
+        for pth in paths:
+            src = Path(pth).resolve()
+            if not src.exists() or src.suffix.lower() != '.tex':
+                continue
+            dest = _copy_tex_into_projects(src)
+            if not dest:
+                continue
+            # Avoid duplicates by absolute path
+            if any(Path(x['path']).resolve() == dest.resolve() for x in projects):
+                continue
+            pid = str(len(projects) + 1)
+            name = dest.stem.replace('_', ' ').title()
+            rec = {'id': pid, 'name': name, 'path': str(dest.resolve())}
+            projects.append(rec)
+            id_to_path[pid] = str(dest.resolve())
+            project_listbox.insert(tk.END, f"{pid} - {name}")
+            added += 1
+        if added:
+            messagebox.showinfo("Projects", f"Copied & added {added} project(s) to modules/projects.")
+
+    # Fallback: add files button
+    def _add_files_dialog():
+        from tkinter import filedialog
+        files = filedialog.askopenfilenames(title="Select .tex project files", filetypes=[("TeX files", "*.tex")])
+        add_project_paths(list(files))
+
+    # Button below list (row 2)
+    add_btn = ttk.Button(proj_outer, text="Add .tex files…", command=_add_files_dialog)
+    add_btn.grid(row=2, column=0, sticky="w", pady=(6, 0))
+
+    # DnD bindings if available
+    if TkinterDnD and DND_FILES:
+        def _on_enter(_e):
+            project_listbox.configure(highlightthickness=2, highlightbackground="#5cb85c")
+        def _on_leave(_e):
+            project_listbox.configure(highlightthickness=0)
+        project_listbox.drop_target_register(DND_FILES)
+        project_listbox.dnd_bind('<<DropEnter>>', _on_enter)
+        project_listbox.dnd_bind('<<DropLeave>>', _on_leave)
+        def _on_drop(e):
+            project_listbox.configure(highlightthickness=0)
+            paths = _parse_dnd_file_list(e.data)
+            add_project_paths(paths)
+            return 'break'
+        project_listbox.dnd_bind('<<Drop>>', _on_drop)
 
     # CV options
     compile_var = tk.BooleanVar(value=True)
@@ -774,7 +987,8 @@ def run_app():
                     job_folder, cv_path, summary, selected_ids,
                     compile_var.get(), clean_var.get(), False,
                     id_to_path,
-                    raw_summary_var.get()   # <--- passes the toggle state
+                    raw_summary_var.get(),
+                    ui_parent=root
                 )
                 if not ok:
                     return
@@ -787,6 +1001,7 @@ def run_app():
                         return
                     ok2 = customise_cover_letter_content(
                         cl_path, cl_body, cl_compile_var.get(), clean_var.get(), False,
+                        ui_parent=root
                     )
                     if not ok2:
                         return
