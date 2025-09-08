@@ -12,6 +12,11 @@ from pathlib import Path
 import json
 import sv_ttk
 
+# =========================
+# USER-CONFIGURABLE: change this and run the app
+# =========================
+CANDIDATE_NAME = "Patrica Wong"  # The name to write into \name{...} and filenames
+
 # Optional preview deps (install: pip install pymupdf pillow)
 try:
     import fitz  # PyMuPDF
@@ -31,7 +36,7 @@ CV/CL Builder GUI (single-template version)
 - Creates per-job folders: jobs/<company>/<role[_n]>/
 - Copies LaTeX templates and injects summary + selected projects
 - (Optional) compiles and shows a right‑side PDF preview
--  Drag-and-drop .tex project files into the Projects list to add them on the fly.
+- Drag-and-drop .tex project files into the Projects list to add them on the fly.
 
 Main sections
 1) Paths & template resolution
@@ -89,13 +94,22 @@ def ensure_unique_folder(base: Path) -> Path:
         n += 1
 
 
+def filename_prefix_from_name(full_name: str) -> str:
+    """Return something like Last_First (letters only) for filenames."""
+    parts = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]+", full_name)
+    if not parts:
+        return "Candidate"
+    first = parts[0].title()
+    last = parts[-1].title()
+    return f"{last}_{first}"
+
 # =========================
 # 2) LaTeX HELPERS (escape, patchers, compile)
 # =========================
 
 def rewrite_module_inputs_to_absolute(tex_path: str):
     r"""Rewrite \input{...modules/...} and \includegraphics{...modules/...} to absolute paths.
-    Keeps LaTeX happy when compiling from jobs/<company>/<role>/.
+    Keeps LaTeX happy when compiling from jobs/<company>/<role/>.
     """
     def absify(rel: str) -> str:
         rel_path = Path(rel).as_posix()
@@ -132,6 +146,28 @@ LATEX_SPECIALS = {
 
 def latex_escape(text):
     return "".join(LATEX_SPECIALS.get(ch, ch) for ch in text)
+
+def patch_cv_candidate_name(cv_path: str, full_name: str):
+    """Replace the first \name{...} occurrence with the candidate's name.
+    Uses a callable replacement so Python doesn't interpret backslashes
+    like "\n" as a newline.
+    """
+    try:
+        s = Path(cv_path).read_text(encoding='utf-8')
+    except Exception:
+        return
+    escaped = latex_escape(full_name.strip()) if full_name else "Candidate"
+    pattern = r"\\name\s*\{[^{}]*\}"
+
+    def _repl(_m):
+        return chr(92) + "name{" + escaped + "}"
+
+    new_s, n = re.subn(pattern, _repl, s, count=1)
+    if n:
+        try:
+            Path(cv_path).write_text(new_s, encoding='utf-8')
+        except Exception:
+            pass
 
 # File IO
 
@@ -320,11 +356,13 @@ def create_cv_for(role_title, company_name, job_link):
     job_folder = ensure_unique_folder(base_folder)
     job_folder.mkdir(parents=True, exist_ok=True)
 
-    destination_file = job_folder / "Barouni_Omar_CV.tex"
+    prefix = filename_prefix_from_name(CANDIDATE_NAME)
+    destination_file = job_folder / f"{prefix}_CV.tex"
 
     try:
         shutil.copy(str(template_path), str(destination_file))
         rewrite_module_inputs_to_absolute(str(destination_file))
+        patch_cv_candidate_name(str(destination_file), CANDIDATE_NAME)
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare CV files:\n{e}")
         return None, None
@@ -401,10 +439,12 @@ def create_cover_letter_for(job_folder: str):
         messagebox.showerror("Error", "No cover letter template found at base/cover_letter.tex.")
         return None
 
-    dest = Path(job_folder) / "Barouni_Omar_Cover_Letter.tex"
+    prefix = filename_prefix_from_name(CANDIDATE_NAME)
+    dest = Path(job_folder) / f"{prefix}_Cover_Letter.tex"
     try:
         shutil.copy(str(tpl), str(dest))
         rewrite_module_inputs_to_absolute(str(dest))
+        patch_cv_candidate_name(str(dest), CANDIDATE_NAME)
         return str(dest)
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare cover letter file:\n{e}")
