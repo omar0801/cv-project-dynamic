@@ -8,18 +8,22 @@ A tiny app that assembles a tailored CV (and optional cover letter) from LaTeX t
 
 1. **Install Python 3.10+**
 
-2. **Install MiKTeX (full + auto‑packages)**
+2. **Install MiKTeX (full + auto-packages)**
 
-   * Download MiKTeX (Windows) and install.
+   * Download MiKTeX: [miktex.org/download](https://miktex.org/download)
+   * Or copy this URL:
+     ```
+     https://miktex.org/download
+     ```
    * During install, set **“Install missing packages on-the-fly” → *Yes***.
    * Open **MiKTeX Console → Updates → Check for updates** and apply all.
    * In **MiKTeX Console → Packages**, search and install **`latexmk`** (recommended). The app will fall back to `pdflatex` if `latexmk` isn’t found.
    * Verify in a new terminal:
-
-     ```bat
+     ```
      where pdflatex
      where latexmk
      ```
+
 
 3. **Create & activate a virtual environment**
 
