@@ -13,12 +13,12 @@ A tiny app that assembles a tailored CV (and optional cover letter) from LaTeX t
    * Download MiKTeX: [miktex.org/download](https://miktex.org/download)
    * During install, set **“Install missing packages on-the-fly” → *Yes***.
    * Open **MiKTeX Console → Updates → Check for updates** and apply all.
-   * In **MiKTeX Console → Packages**, search and install **`latexmk`** (recommended). The app will fall back to `pdflatex` if `latexmk` isn’t found.
-   * Verify in a new terminal:
+   * Verify in a new PowerShell:
+     ```ps1
+     Get-Command pdflatex
+     pdflatex --version
      ```
-     where pdflatex
-     where latexmk
-     ```
+
 
 
 3. **Create & activate a virtual environment**
