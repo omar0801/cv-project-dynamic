@@ -35,7 +35,7 @@ except Exception:
 CV/CL Builder GUI (single-template version)
 - Creates per-job folders: jobs/<company>/<role[_n]>/
 - Copies LaTeX templates and injects summary + selected projects
-- (Optional) compiles and shows a right‑side PDF preview
+- (Optional) compiles and shows a right-side PDF preview
 - Drag-and-drop .tex project files into the Projects list to add them on the fly.
 
 Main sections
@@ -184,7 +184,8 @@ def write_file(path, lines):
 def clean_latex_junk(tex_file_path: str, keep_log: bool = True):
     tex_dir = os.path.dirname(tex_file_path)
     base_name = os.path.splitext(os.path.basename(tex_file_path))[0]
-    exts = [".aux", ".out", ".toc", ".fls", ".fdb_latexmk", ".synctex.gz"]
+    # latexmk removed; no .fdb_latexmk needed
+    exts = [".aux", ".out", ".toc", ".fls", ".synctex.gz"]
     if not keep_log:
         exts.append(".log")
     for ext in exts:
@@ -195,34 +196,16 @@ def clean_latex_junk(tex_file_path: str, keep_log: bool = True):
             except Exception:
                 pass
 
-# Compilation pipeline: latexmk -> pdflatex x2 fallback
-
-def which(cmd):
-    from shutil import which as _which
-    return _which(cmd)
-
-def try_latexmk(tex_dir, base_name, env) -> bool:
-    if which("latexmk"):
-        try:
-            subprocess.run(
-                ["latexmk", "-pdf", "-silent", f"{base_name}.tex"],
-                cwd=tex_dir,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=_win_no_window_flags(),
-                check=True,
-            )
-            return True
-        except Exception:
-            return False
-    return False
+# =========================
+# Compilation pipeline: pdflatex only
+# =========================
 
 def compile_with_pdflatex(tex_dir, base_name, env) -> int:
     rc = 0
+    # Two passes for refs/TOC
     for _ in range(2):
         proc = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", f"{base_name}.tex"],
+            ["pdflatex", "-interaction=nonstopmode", "-file-line-error", f"{base_name}.tex"],
             cwd=tex_dir,
             env=env,
             stdout=subprocess.DEVNULL,
@@ -271,7 +254,6 @@ def show_log_excerpt(log_path: str, parent):
     t.configure(state="disabled")
     ttk.Button(win, text="Open full log", command=lambda: open_pdf_viewer(log_path)).pack(anchor="e", padx=8, pady=8)
 
-
 def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
     tex_dir = os.path.dirname(tex_file_path)
     base_name = os.path.splitext(os.path.basename(tex_file_path))[0]
@@ -282,11 +264,9 @@ def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
     env['TEXINPUTS'] = str(RPATH('base')) + os.pathsep + env.get('TEXINPUTS', '')
 
     try:
-        ok = try_latexmk(tex_dir, base_name, env)
-        if not ok:
-            rc = compile_with_pdflatex(tex_dir, base_name, env)
-            if rc != 0:
-                raise RuntimeError("pdflatex failed")
+        rc = compile_with_pdflatex(tex_dir, base_name, env)
+        if rc != 0:
+            raise RuntimeError("pdflatex failed")
 
         if clean_files:
             clean_latex_junk(tex_file_path, keep_log=False)
@@ -298,7 +278,6 @@ def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
             clean_latex_junk(tex_file_path, keep_log=True)
         hint = f"{e} — check log: {log_path}"
         return False, hint, log_path
-
 
 # =========================
 # 3) PROJECT LOADER & CORE ACTIONS
@@ -484,9 +463,8 @@ def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt
 
     return True
 
-
 # =========================
-# 4) RIGHT‑SIDE PREVIEW PANEL
+# 4) RIGHT-SIDE PREVIEW PANEL
 # =========================
 
 def build_side_preview(root):
@@ -531,7 +509,7 @@ def build_side_preview(root):
     panel._current_path = None
 
     # --- Scroll speed knobs ---
-    panel._scroll_units_v = 2 
+    panel._scroll_units_v = 2
     panel._scroll_units_h = 2
 
     def _update_scroll_region(_evt=None):
@@ -582,7 +560,7 @@ def build_side_preview(root):
         path = getattr(root, "last_cv_pdf", None) if choice == "cv" else getattr(root, "last_cl_pdf", None)
         panel._current_path = path
         render_pdf(path)
-    
+
     def _is_over_preview():
         x, y = root.winfo_pointerx(), root.winfo_pointery()
         w = root.winfo_containing(x, y)
@@ -631,7 +609,6 @@ def build_side_preview(root):
     canvas.bind_all("<MouseWheel>", _on_wheel)
     canvas.bind_all("<Shift-MouseWheel>", _on_shift_wheel)
 
-
     def _reset_zoom(_evt=None):
         if panel._current_path:
             render_pdf(panel._current_path, 1.0)
@@ -645,7 +622,6 @@ def build_side_preview(root):
         "get_zoom": lambda: panel._current_zoom,
         "set_zoom": lambda z: render_pdf(panel._current_path, z),
     }
-
 
 # =========================
 # 5) GUI WIRING (with drag-and-drop for .tex projects)
@@ -1032,7 +1008,6 @@ def run_app():
     root.bind("<Control-Return>", on_generate)
 
     root.mainloop()
-
 
 if __name__ == "__main__":
     run_app()
