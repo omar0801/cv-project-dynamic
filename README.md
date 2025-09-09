@@ -79,8 +79,8 @@ jobs/                 # auto-created per application (output)
 
 Your `base/cv.tex` **must** contain these exact comments so the app knows where to inject:
 
-* `%% PASTE SUMMARY HERE` — your summary text goes here
-* `%% PROJECT PATHS HERE` — `\input{...}` lines for the chosen projects go here
+* `% PASTE SUMMARY HERE` — your summary text goes here
+* `% PROJECT PATHS HERE` — `\input{...}` lines for the chosen projects go here
 
 > Keep these markers inside the body (after `\begin{document}`) to avoid LaTeX errors.
 
@@ -88,17 +88,24 @@ Your `base/cv.tex` **must** contain these exact comments so the app knows where 
 
 ## Using the app
 
-1. **Company** — name of the company you’re applying to.
-2. **Role Title** — title of the job.
-3. **Job Link** — just saved into `job-notes.md` for your records.
-4. **Summary** — paste or type your tailored summary. Toggle *Insert raw LaTeX in summary* if you want to include LaTeX markup.
-5. **Projects** — select 1–4 relevant items from the list.
-6. Options:
+1. **Company**:  name of the company you’re applying to.
+2. **Role Title** : title of the job.
+3. **Job Link**: just saved into `job-notes.md` for your records.
+4. **Summary**: paste or type your tailored summary. Toggle *Insert raw LaTeX in summary* if you want to include LaTeX markup.
+5. **Projects**: select 1–4 relevant items from the list.
 
-   * **Compile CV to PDF** — build a PDF via `latexmk` (or `pdflatex` fallback).
-   * **Clean LaTeX junk files** — removes `.aux/.out/.toc/...` after compile.
-   * **Include cover letter** — paste body text; the app fills and compiles `cover_letter.tex`.
-7. Click **Generate**.
+**Options (checkboxes):**
+- **Compile CV to PDF** — builds the PDF with `pdflatex` (no Perl needed).
+- **Clean LaTeX junk files** — removes `.aux/.out/.toc/...` after compile.
+- **Include cover letter** — paste body text; the app fills and compiles `cover_letter.tex`.
+
+6. **Click Generate**.
+
+### Keyboard shortcuts
+- **Ctrl + Enter** — Generate
+- **Ctrl + Mouse Wheel** — Zoom preview in/out
+- **Shift + Mouse Wheel** — Horizontal scroll in preview
+- **Ctrl + 0** — Reset preview zoom
 
 **Output** (example):
 
@@ -138,7 +145,7 @@ Each project snippet should be a self-contained LaTeX chunk, e.g.:
 
 ```tex
 \begin{rSubsection}{Project Title}{Jan. 2024 – Apr. 2024}{Role / Course}{ }
-  \item Built X using Y; achieved Z (\\textbf{metrics}).
+  \item Built X using Y; achieved Z (\textbf{metrics}).
   \item Deployed on <cloud/board>; automated with CI/CD; tests at N%\,coverage.
 \end{rSubsection}
 ```
