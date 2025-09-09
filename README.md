@@ -24,7 +24,7 @@ A tiny app that assembles a tailored CV (and optional cover letter) from LaTeX t
 3. **Create & activate a virtual environment**
 
    ```bat
-   py -3 -m venv .venv
+   python -m venv .venv
    .venv\Scripts\activate
    python -m pip install --upgrade pip
    ```
@@ -45,8 +45,6 @@ A tiny app that assembles a tailored CV (and optional cover letter) from LaTeX t
      ```python
      CANDIDATE_NAME = "Your Name"
      ```
-
-     The app will use this for filenames and will update the `\name{...}` field in the LaTeX template.
 
 6. **Run the app**
 
@@ -93,7 +91,7 @@ Your `base/cv.tex` **must** contain these exact comments so the app knows where 
 1. **Company** — name of the company you’re applying to.
 2. **Role Title** — title of the job.
 3. **Job Link** — just saved into `job-notes.md` for your records.
-4. **Summary** — paste or type your tailored summary (see tips below). Toggle *Insert raw LaTeX in summary* if you want to include LaTeX markup.
+4. **Summary** — paste or type your tailored summary. Toggle *Insert raw LaTeX in summary* if you want to include LaTeX markup.
 5. **Projects** — select 1–4 relevant items from the list.
 6. Options:
 

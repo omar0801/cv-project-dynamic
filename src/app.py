@@ -15,7 +15,7 @@ import sv_ttk
 # =========================
 # USER-CONFIGURABLE: change this and run the app
 # =========================
-CANDIDATE_NAME = "Patrica Wong"  # The name to write into \name{...} and filenames
+CANDIDATE_NAME = "Your Name"  # The name to write into \name{...} and filenames
 
 # Optional preview deps (install: pip install pymupdf pillow)
 try:
