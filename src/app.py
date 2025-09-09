@@ -11,6 +11,9 @@ from tkinter import ttk, messagebox
 from pathlib import Path
 import json
 import sv_ttk
+from datetime import datetime
+
+APP_NAME = "CV/CL Builder"
 
 # =========================
 # USER-CONFIGURABLE: change this and run the app
@@ -112,6 +115,8 @@ def rewrite_module_inputs_to_absolute(tex_path: str):
     Keeps LaTeX happy when compiling from jobs/<company>/<role/>.
     """
     def absify(rel: str) -> str:
+        if os.path.isabs(rel) or rel.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", rel):
+            return Path(rel).as_posix()
         rel_path = Path(rel).as_posix()
         while rel_path.startswith('../'):
             rel_path = rel_path[3:]
@@ -123,9 +128,9 @@ def rewrite_module_inputs_to_absolute(tex_path: str):
     try:
         text = Path(tex_path).read_text(encoding='utf-8')
         text = re.sub(r'\\input\{([^\}]*/?modules/[^\}]*)\}',
-                        lambda m: '\\input{' + absify(m.group(1)) + '}', text)
+                      lambda m: '\\input{' + absify(m.group(1)) + '}', text)
         text = re.sub(r'(\\includegraphics(?:\[[^\]]*\])?\{)([^\}]*modules/[^\}]*)(\})',
-                        lambda m: m.group(1) + absify(m.group(2)) + m.group(3), text)
+                      lambda m: m.group(1) + absify(m.group(2)) + m.group(3), text)
         Path(tex_path).write_text(text, encoding='utf-8')
     except Exception:
         pass
@@ -147,11 +152,13 @@ LATEX_SPECIALS = {
 def latex_escape(text):
     return "".join(LATEX_SPECIALS.get(ch, ch) for ch in text)
 
+def normalize_quotes(s: str) -> str:
+    # (7) friendlier curly-quote handling
+    return (s.replace("“", "``").replace("”", "''")
+             .replace("‘", "`").replace("’", "'"))
+
 def patch_cv_candidate_name(cv_path: str, full_name: str):
-    """Replace the first \name{...} occurrence with the candidate's name.
-    Uses a callable replacement so Python doesn't interpret backslashes
-    like "\n" as a newline.
-    """
+    """Replace the first \name{...} occurrence with the candidate's name."""
     try:
         s = Path(cv_path).read_text(encoding='utf-8')
     except Exception:
@@ -197,8 +204,18 @@ def clean_latex_junk(tex_file_path: str, keep_log: bool = True):
                 pass
 
 # =========================
-# Compilation pipeline: pdflatex only
+# Compilation pipeline: pdflatex
 # =========================
+
+def _with_texinputs(env: dict) -> dict:
+    """(2) Ensure TEXINPUTS includes base/ and keeps default search paths."""
+    env = env.copy()
+    base = str(RPATH('base')) + os.pathsep  # trailing sep => keep defaults
+    prev = env.get('TEXINPUTS', '')
+    if prev and not prev.endswith(os.pathsep):
+        prev += os.pathsep
+    env['TEXINPUTS'] = base + prev
+    return env
 
 def compile_with_pdflatex(tex_dir, base_name, env) -> int:
     rc = 0
@@ -239,17 +256,28 @@ def open_folder(path):
 
 # ---- Small viewer for LaTeX log tail ----
 
+def _first_tex_error_line(log_text: str) -> str | None:
+    for line in log_text.splitlines():
+        ln = line.strip()
+        if ln.startswith("!") or (" Error" in ln and "!" in ln):
+            return ln
+    return None
+
 def show_log_excerpt(log_path: str, parent):
     try:
         txt = Path(log_path).read_text(encoding="utf-8", errors="ignore")
+        head = _first_tex_error_line(txt)
         tail = "\n".join(txt.splitlines()[-150:])
     except Exception as e:
+        head = None
         tail = f"Could not read log: {e}"
     win = tk.Toplevel(parent)
     win.title("LaTeX log")
     win.geometry("900x600")
+    if head:
+        ttk.Label(win, text=head, foreground="#ff6b6b", anchor="w", wraplength=860).pack(fill="x", padx=8, pady=(8, 0))
     t = tk.Text(win, wrap="none")
-    t.pack(fill="both", expand=True)
+    t.pack(fill="both", expand=True, padx=0, pady=(6,0))
     t.insert("1.0", tail)
     t.configure(state="disabled")
     ttk.Button(win, text="Open full log", command=lambda: open_pdf_viewer(log_path)).pack(anchor="e", padx=8, pady=8)
@@ -260,8 +288,7 @@ def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
     pdf_path = os.path.join(tex_dir, base_name + ".pdf")
     log_path = os.path.join(tex_dir, base_name + ".log")
 
-    env = os.environ.copy()
-    env['TEXINPUTS'] = str(RPATH('base')) + os.pathsep + env.get('TEXINPUTS', '')
+    env = _with_texinputs(os.environ)  # (2) TEXINPUTS handling
 
     try:
         rc = compile_with_pdflatex(tex_dir, base_name, env)
@@ -352,6 +379,7 @@ def create_cv_for(role_title, company_name, job_link):
             f.write(f"# Job Application Notes - {company_name}\n\n")
             f.write(f"**Role:** {role_title}\n")
             f.write(f"**Job Link:** {job_link}\n")
+            f.write(f"**Created:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")  # (5)
     except Exception:
         pass
 
@@ -386,7 +414,7 @@ def customise_cv_content(job_folder, cv_path, summary, selected_ids, compile_opt
         messagebox.showerror("Missing project files", f"Missing entries: {', '.join(missing)}")
         return False
 
-    raw = summary.strip()
+    raw = normalize_quotes(summary.strip())
     escaped_summary = raw if is_raw_summary else latex_escape(raw)
 
     new_lines = []
@@ -440,7 +468,8 @@ def customise_cover_letter_content(cl_tex_path: str, body_text: str, compile_opt
     if not has_marker:
         messagebox.showwarning("Warning", "Cover letter template missing '% PASTE HERE' marker.")
 
-    escaped_body = latex_escape(body_text.strip())
+    raw = normalize_quotes(body_text.strip())
+    escaped_body = latex_escape(raw)
 
     new_lines = []
     inserted = False
@@ -684,13 +713,31 @@ def _copy_tex_into_projects(src: Path) -> Path | None:
         messagebox.showerror("Copy failed", f"Could not copy {src} -> {dest}:\n{e}")
         return None
 
+def _assert_pdflatex_or_explain(root=None) -> bool:
+    from shutil import which as _which
+    if _which("pdflatex"):
+        return True
+    msg = (
+        "pdflatex not found on PATH.\n\n"
+        "Fix:\n"
+        "1) Open MiKTeX Console → Updates, apply all.\n"
+        "2) Ensure MiKTeX bin is on PATH (e.g. C:\\Program Files\\MiKTeX\\miktex\\bin\\x64).\n"
+        "3) Open a new PowerShell and run:\n"
+        "   Get-Command pdflatex\n   pdflatex --version"
+    )
+    if root:
+        messagebox.showerror("pdflatex not found", msg, parent=root)
+    else:
+        print(msg)
+    return False
+
 def run_app():
     # Use TkinterDnD if available for native drag-and-drop
     if TkinterDnD is not None:
         root = TkinterDnD.Tk()
     else:
         root = tk.Tk()
-    root.title("")
+    root.title(APP_NAME)
 
     # Dark theme + base typography
     sv_ttk.set_theme("dark")
@@ -926,6 +973,9 @@ def run_app():
         raw_summary_var.set(False)
 
     def on_generate(_evt=None):
+        if not _assert_pdflatex_or_explain(root):
+            return
+
         role_title = role_entry.get().strip()
         company = company_entry.get().strip()
         job_link = job_link_entry.get().strip()
@@ -940,25 +990,27 @@ def run_app():
             pid = row.split(' - ', 1)[0].strip()
             selected_ids.append(pid)
 
-        if not (role_title and company and job_link and summary and selected_ids):
-            messagebox.showwarning("Missing Info", "Please complete all CV fields.")
+        if not (role_title and company and job_link and summary):
+            messagebox.showwarning("Missing Info", "Please complete all CV fields.", parent=root)
             return
-
+        if not selected_ids:  # enforce at least one project (no upper limit)
+            messagebox.showwarning("Missing Info", "Select at least one project.", parent=root)
+            return
         if want_cl and not cl_body:
-            messagebox.showwarning("Missing Info", "Please add cover letter body text or untick 'Include cover letter'.")
+            messagebox.showwarning("Missing Info", "Please add cover letter body text or untick 'Include cover letter'.", parent=root)
             return
 
         def work():
             try:
-                root.config(cursor="watch")
-                status_var.set("Creating files...")
-                generate_btn.config(state="disabled")
+                root.after(0, lambda: (root.config(cursor="watch"),
+                                       generate_btn.config(state="disabled"),
+                                       status_var.set("Creating files...")))
                 job_folder, cv_path = create_cv_for(role_title, company, job_link)
                 if not job_folder:
-                    messagebox.showerror("Error", "Failed to create files.")
+                    root.after(0, lambda: messagebox.showerror("Error", "Failed to create files.", parent=root))
                     return
 
-                status_var.set("Customising CV template...")
+                root.after(0, lambda: status_var.set("Customising CV template..."))
                 ok = customise_cv_content(
                     job_folder, cv_path, summary, selected_ids,
                     compile_var.get(), clean_var.get(), False,
@@ -971,7 +1023,7 @@ def run_app():
 
                 cl_path = None
                 if want_cl:
-                    status_var.set("Preparing cover letter...")
+                    root.after(0, lambda: status_var.set("Preparing cover letter..."))
                     cl_path = create_cover_letter_for(job_folder)
                     if not cl_path:
                         return
@@ -982,25 +1034,28 @@ def run_app():
                     if not ok2:
                         return
 
-                open_folder_btn.config(state="normal", command=lambda p=job_folder: open_folder(p))
-                status_var.set("Done.")
+                def _finish():
+                    open_folder_btn.config(state="normal", command=lambda p=job_folder: open_folder(p))
+                    status_var.set("Done.")
 
-                # Update preview sources
-                cv_pdf = cv_path[:-4] + ".pdf"
-                root.last_cv_pdf = cv_pdf if os.path.exists(cv_pdf) else None
-                root.last_cl_pdf = None
-                if want_cl and cl_path:
-                    cl_pdf = str(Path(cl_path).with_suffix(".pdf"))
-                    root.last_cl_pdf = cl_pdf if os.path.exists(cl_pdf) else None
+                    # Update preview sources
+                    cv_pdf = cv_path[:-4] + ".pdf"
+                    root.last_cv_pdf = cv_pdf if os.path.exists(cv_pdf) else None
+                    root.last_cl_pdf = None
+                    if want_cl and cl_path:
+                        cl_pdf = str(Path(cl_path).with_suffix(".pdf"))
+                        root.last_cl_pdf = cl_pdf if os.path.exists(cl_pdf) else None
 
-                # Always show preview (CV first)
-                root._preview["select_var"].set("cv")
-                root._preview["refresh"]()
+                    # Always show preview (CV first)
+                    root._preview["select_var"].set("cv")
+                    root._preview["refresh"]()
 
-                clear_form()
+                    clear_form()
+
+                root.after(0, _finish)
             finally:
-                root.config(cursor="")
-                generate_btn.config(state="normal")
+                root.after(0, lambda: (root.config(cursor=""),
+                                        generate_btn.config(state="normal")))
 
         threading.Thread(target=work, daemon=True).start()
 
