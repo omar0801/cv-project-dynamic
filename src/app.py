@@ -7,18 +7,25 @@ import platform
 import threading
 import tkinter as tk
 import tkinter.font as tkFont
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 from pathlib import Path
 import json
-import sv_ttk
 from datetime import datetime
+import ttkbootstrap as tb
+from ttkbootstrap import ttk
 
 APP_NAME = "CV/CL Builder"
 
 # =========================
-# USER-CONFIGURABLE: change this and run the app
+# USER-CONFIGURABLE
 # =========================
 CANDIDATE_NAME = "Your Name"  # The name to write into \name{...} and filenames
+
+# Pick any ttkbootstrap theme: flatly, darkly, cyborg, minty, sandstone, solar, etc.
+THEME_NAME = "cyborg"
+
+# Optional: override the primary button color (set to a hex like "#7c3aed" or None)
+PRIMARY_HEX = None
 
 # Optional preview deps (install: pip install pymupdf pillow)
 try:
@@ -96,7 +103,6 @@ def ensure_unique_folder(base: Path) -> Path:
             return cand
         n += 1
 
-
 def filename_prefix_from_name(full_name: str) -> str:
     """Return something like Last_First (letters only) for filenames."""
     parts = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]+", full_name)
@@ -153,7 +159,6 @@ def latex_escape(text):
     return "".join(LATEX_SPECIALS.get(ch, ch) for ch in text)
 
 def normalize_quotes(s: str) -> str:
-    # (7) friendlier curly-quote handling
     return (s.replace("“", "``").replace("”", "''")
              .replace("‘", "`").replace("’", "'"))
 
@@ -208,7 +213,7 @@ def clean_latex_junk(tex_file_path: str, keep_log: bool = True):
 # =========================
 
 def _with_texinputs(env: dict) -> dict:
-    """(2) Ensure TEXINPUTS includes base/ and keeps default search paths."""
+    """Ensure TEXINPUTS includes base/ and keeps default search paths."""
     env = env.copy()
     base = str(RPATH('base')) + os.pathsep  # trailing sep => keep defaults
     prev = env.get('TEXINPUTS', '')
@@ -275,9 +280,9 @@ def show_log_excerpt(log_path: str, parent):
     win.title("LaTeX log")
     win.geometry("900x600")
     if head:
-        ttk.Label(win, text=head, foreground="#ff6b6b", anchor="w", wraplength=860).pack(fill="x", padx=8, pady=(8, 0))
+        tk.Label(win, text=head, fg="#ff6b6b", anchor="w", wraplength=860).pack(fill="x", padx=8, pady=(8, 0))
     t = tk.Text(win, wrap="none")
-    t.pack(fill="both", expand=True, padx=0, pady=(6,0))
+    t.pack(fill="both", expand=True, padx=0, pady=(6, 0))
     t.insert("1.0", tail)
     t.configure(state="disabled")
     ttk.Button(win, text="Open full log", command=lambda: open_pdf_viewer(log_path)).pack(anchor="e", padx=8, pady=8)
@@ -288,7 +293,7 @@ def compile_latex(tex_file_path, open_pdf=False, clean_files=False):
     pdf_path = os.path.join(tex_dir, base_name + ".pdf")
     log_path = os.path.join(tex_dir, base_name + ".log")
 
-    env = _with_texinputs(os.environ)  # (2) TEXINPUTS handling
+    env = _with_texinputs(os.environ)
 
     try:
         rc = compile_with_pdflatex(tex_dir, base_name, env)
@@ -379,7 +384,7 @@ def create_cv_for(role_title, company_name, job_link):
             f.write(f"# Job Application Notes - {company_name}\n\n")
             f.write(f"**Role:** {role_title}\n")
             f.write(f"**Job Link:** {job_link}\n")
-            f.write(f"**Created:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")  # (5)
+            f.write(f"**Created:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
     except Exception:
         pass
 
@@ -732,16 +737,21 @@ def _assert_pdflatex_or_explain(root=None) -> bool:
     return False
 
 def run_app():
-    # Use TkinterDnD if available for native drag-and-drop
+    # Root: prefer TkinterDnD if available; ttkbootstrap styles will theme it
     if TkinterDnD is not None:
         root = TkinterDnD.Tk()
     else:
         root = tk.Tk()
     root.title(APP_NAME)
 
-    # Dark theme + base typography
-    sv_ttk.set_theme("dark")
-    style = ttk.Style()
+    # --- ttkbootstrap theme & fonts ---
+    style = tb.Style(THEME_NAME)
+    # Optional: override the primary button appearance
+    if PRIMARY_HEX:
+        style.configure("primary.TButton", background=PRIMARY_HEX, foreground="white", bordercolor=PRIMARY_HEX)
+        style.map("primary.TButton", background=[("active", PRIMARY_HEX)])
+
+    # typography (works fine with ttkbootstrap)
     style.configure(".", font=("Segoe UI", 10))
     for k in ("TCombobox", "TLabel", "TEntry", "TCheckbutton"):
         style.configure(k, font=("Segoe UI", 11))
@@ -875,7 +885,7 @@ def run_app():
         add_project_paths(list(files))
 
     # Button below list (row 2)
-    add_btn = ttk.Button(proj_outer, text="Add .tex files…", command=_add_files_dialog)
+    add_btn = ttk.Button(proj_outer, text="Add .tex files…", command=_add_files_dialog, bootstyle="secondary")
     add_btn.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
     # DnD bindings if available
@@ -953,10 +963,10 @@ def run_app():
     status_label = ttk.Label(root, textvariable=status_var, anchor="w")
     status_label.grid(row=10, column=0, columnspan=2, sticky="we", padx=8, pady=(4, 0))
 
-    open_folder_btn = ttk.Button(root, text="Open job folder", state="disabled")
+    open_folder_btn = ttk.Button(root, text="Open job folder", state="disabled", bootstyle="secondary")
     open_folder_btn.grid(row=11, column=0, sticky="w", padx=8, pady=8)
 
-    generate_btn = ttk.Button(root, text="Generate")
+    generate_btn = ttk.Button(root, text="Generate", bootstyle="primary")
     generate_btn.grid(row=11, column=3, sticky="e", padx=8, pady=8)
 
     def clear_form():
