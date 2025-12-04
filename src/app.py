@@ -12,6 +12,8 @@ from pathlib import Path
 import json
 import sv_ttk
 from datetime import datetime
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 APP_NAME = "CV/CL Builder"
 
@@ -336,14 +338,26 @@ def load_projects():
     id_to_path = {p['id']: p['path'] for p in projects}
     return projects, id_to_path
 
-# Create job folder + copy CV template
+# Job folder + assets
 
-def create_cv_for(role_title, company_name, job_link):
-    template_path = resolve_template()
-    if not template_path:
-        messagebox.showerror("Error", "No CV template found at base/cv.tex.")
-        return None, None
+def fetch_job_link_html(job_link: str, job_folder: Path) -> Path | None:
+    """Fetch job link HTML and persist it to job-posting.html (best-effort)."""
+    if not job_link:
+        return None
+    try:
+        req = Request(job_link, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=10) as resp:
+            data = resp.read()
+        dest = job_folder / "job-posting.html"
+        dest.write_bytes(data)
+        return dest
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError):
+        return None
+    except Exception:
+        return None
 
+
+def create_job_folder(role_title: str, company_name: str, job_link: str) -> str | None:
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
         project_root = exe_dir.parent
@@ -362,8 +376,30 @@ def create_cv_for(role_title, company_name, job_link):
     job_folder = ensure_unique_folder(base_folder)
     job_folder.mkdir(parents=True, exist_ok=True)
 
+    notes_file = job_folder / "job-notes.md"
+    try:
+        with open(notes_file, "w", encoding="utf-8") as f:
+            f.write(f"# Job Application Notes - {company_name}\n\n")
+            f.write(f"**Role:** {role_title}\n")
+            f.write(f"**Job Link:** {job_link}\n")
+            f.write(f"**Created:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+    except Exception:
+        pass
+
+    fetch_job_link_html(job_link, job_folder)
+    return str(job_folder)
+
+
+# Create job folder + copy CV template
+def create_cv_for(job_folder: str, role_title: str, company_name: str):
+    job_folder_path = Path(job_folder)
     prefix = filename_prefix_from_name(CANDIDATE_NAME)
-    destination_file = job_folder / f"{prefix}_CV.tex"
+    template_path = resolve_template()
+    if not template_path:
+        messagebox.showerror("Error", "No CV template found at base/cv.tex.")
+        return None
+
+    destination_file = job_folder_path / f"{prefix}_CV.tex"
 
     try:
         shutil.copy(str(template_path), str(destination_file))
@@ -371,19 +407,8 @@ def create_cv_for(role_title, company_name, job_link):
         patch_cv_candidate_name(str(destination_file), CANDIDATE_NAME)
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare CV files:\n{e}")
-        return None, None
-
-    notes_file = job_folder / "job-notes.md"
-    try:
-        with open(notes_file, "w", encoding="utf-8") as f:
-            f.write(f"# Job Application Notes - {company_name}\n\n")
-            f.write(f"**Role:** {role_title}\n")
-            f.write(f"**Job Link:** {job_link}\n")
-            f.write(f"**Created:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")  # (5)
-    except Exception:
-        pass
-
-    return str(job_folder), str(destination_file)
+        return None
+    return str(destination_file)
 
 # Fill summary + projects, optionally compile
 
@@ -784,13 +809,26 @@ def run_app():
     job_link_entry = ttk.Entry(form, width=40)
     job_link_entry.grid(row=2, column=1, sticky="we", pady=4)
 
-    # --- Raw LaTeX toggle (above Summary) ---
+    # CV toggles (generation + raw LaTeX) and cover letter toggle on the same row
+    generate_cv_var = tk.BooleanVar(value=False)
     raw_summary_var = tk.BooleanVar(value=False)
-    ttk.Checkbutton(
-        form,
+    include_cl_var = tk.BooleanVar(value=False)
+    top_toggle_frame = ttk.Frame(form)
+    top_toggle_frame.grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 0))
+    generate_cv_chk = ttk.Checkbutton(
+        top_toggle_frame,
+        text="Generate CV (resume)",
+        variable=generate_cv_var
+    )
+    generate_cv_chk.pack(side="left", padx=(0, 12))
+    raw_summary_chk = ttk.Checkbutton(
+        top_toggle_frame,
         text="Insert raw LaTeX in summary",
         variable=raw_summary_var
-    ).grid(row=3, column=1, sticky="w", pady=(0, 0))
+    )
+    raw_summary_chk.pack(side="left", padx=(0, 12))
+    include_cl_chk = ttk.Checkbutton(top_toggle_frame, text="Include cover letter", variable=include_cl_var)
+    include_cl_chk.pack(side="left")
 
     # Summary (row 4)
     ttk.Label(form, text="Summary:").grid(row=4, column=0, sticky="ne", padx=(0, 8), pady=4)
@@ -875,7 +913,7 @@ def run_app():
         add_project_paths(list(files))
 
     # Button below list (row 2)
-    add_btn = ttk.Button(proj_outer, text="Add .tex files…", command=_add_files_dialog)
+    add_btn = ttk.Button(proj_outer, text="Add .tex files", command=_add_files_dialog)
     add_btn.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
     # DnD bindings if available
@@ -900,13 +938,24 @@ def run_app():
 
     cv_opts = ttk.Frame(root)
     cv_opts.grid(row=7, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 2))
-    ttk.Checkbutton(cv_opts, text="Compile CV to PDF", variable=compile_var).pack(side="left", padx=(0, 15))
-    ttk.Checkbutton(cv_opts, text="Clean LaTeX junk files", variable=clean_var).pack(side="left")
+    compile_chk = ttk.Checkbutton(cv_opts, text="Compile CV to PDF", variable=compile_var)
+    compile_chk.pack(side="left", padx=(0, 15))
+    clean_chk = ttk.Checkbutton(cv_opts, text="Clean LaTeX junk files", variable=clean_var)
+    clean_chk.pack(side="left")
 
-    # Cover letter toggle + editor
-    include_cl_var = tk.BooleanVar(value=False)
-    include_cl_chk = ttk.Checkbutton(root, text="Include cover letter", variable=include_cl_var)
-    include_cl_chk.grid(row=8, column=0, sticky="w", padx=8, pady=(8, 0))
+    def toggle_cv_generation():
+        enabled = generate_cv_var.get()
+        state = "normal" if enabled else "disabled"
+        summary_text.config(state=state)
+        project_listbox.config(state=state)
+        add_btn.config(state=state)
+        raw_summary_chk.config(state=state)
+        compile_chk.config(state=state)
+        clean_chk.config(state=state)
+        if not enabled:
+            compile_var.set(False)
+    generate_cv_chk.config(command=toggle_cv_generation)
+    toggle_cv_generation()
 
     cl_frame = ttk.Labelframe(root, text="Cover letter", labelanchor="nw")
     ttk.Style().configure("TLabelframe.Label", font=("Segoe UI", 11))
@@ -971,15 +1020,17 @@ def run_app():
         update_count()
         update_cl_count()
         raw_summary_var.set(False)
+        generate_cv_var.set(False)
+        compile_var.set(True)
+        clean_var.set(True)
+        toggle_cv_generation()
 
     def on_generate(_evt=None):
-        if not _assert_pdflatex_or_explain(root):
-            return
-
         role_title = role_entry.get().strip()
         company = company_entry.get().strip()
         job_link = job_link_entry.get().strip()
         summary = summary_text.get("1.0", "end-1c").strip()
+        generate_cv = generate_cv_var.get()
         want_cl = include_cl_var.get()
         cl_body = cl_text.get("1.0", "end-1c").strip()
 
@@ -990,11 +1041,18 @@ def run_app():
             pid = row.split(' - ', 1)[0].strip()
             selected_ids.append(pid)
 
-        if not (role_title and company and job_link and summary):
-            messagebox.showwarning("Missing Info", "Please complete all CV fields.", parent=root)
+        compile_needed = (generate_cv and compile_var.get()) or (want_cl and cl_compile_var.get())
+        if compile_needed and not _assert_pdflatex_or_explain(root):
             return
-        if not selected_ids:  # enforce at least one project (no upper limit)
-            messagebox.showwarning("Missing Info", "Select at least one project.", parent=root)
+
+        if not (role_title and company and job_link):
+            messagebox.showwarning("Missing Info", "Please complete company, role, and job link.", parent=root)
+            return
+        if generate_cv and not summary:
+            messagebox.showwarning("Missing Info", "Please add a CV summary or turn off CV generation.", parent=root)
+            return
+        if generate_cv and not selected_ids:
+            messagebox.showwarning("Missing Info", "Select at least one project or turn off CV generation.", parent=root)
             return
         if want_cl and not cl_body:
             messagebox.showwarning("Missing Info", "Please add cover letter body text or untick 'Include cover letter'.", parent=root)
@@ -1005,21 +1063,28 @@ def run_app():
                 root.after(0, lambda: (root.config(cursor="watch"),
                                        generate_btn.config(state="disabled"),
                                        status_var.set("Creating files...")))
-                job_folder, cv_path = create_cv_for(role_title, company, job_link)
+                job_folder = create_job_folder(role_title, company, job_link)
                 if not job_folder:
                     root.after(0, lambda: messagebox.showerror("Error", "Failed to create files.", parent=root))
                     return
 
-                root.after(0, lambda: status_var.set("Customising CV template..."))
-                ok = customise_cv_content(
-                    job_folder, cv_path, summary, selected_ids,
-                    compile_var.get(), clean_var.get(), False,
-                    id_to_path,
-                    raw_summary_var.get(),
-                    ui_parent=root
-                )
-                if not ok:
-                    return
+                cv_path = None
+                if generate_cv:
+                    root.after(0, lambda: status_var.set("Preparing CV files..."))
+                    cv_path = create_cv_for(job_folder, role_title, company)
+                    if not cv_path:
+                        return
+
+                    root.after(0, lambda: status_var.set("Customising CV template..."))
+                    ok = customise_cv_content(
+                        job_folder, cv_path, summary, selected_ids,
+                        compile_var.get(), clean_var.get(), False,
+                        id_to_path,
+                        raw_summary_var.get(),
+                        ui_parent=root
+                    )
+                    if not ok:
+                        return
 
                 cl_path = None
                 if want_cl:
@@ -1039,15 +1104,20 @@ def run_app():
                     status_var.set("Done.")
 
                     # Update preview sources
-                    cv_pdf = cv_path[:-4] + ".pdf"
-                    root.last_cv_pdf = cv_pdf if os.path.exists(cv_pdf) else None
+                    root.last_cv_pdf = None
+                    if cv_path:
+                        cv_pdf = str(Path(cv_path).with_suffix(".pdf"))
+                        root.last_cv_pdf = cv_pdf if os.path.exists(cv_pdf) else None
                     root.last_cl_pdf = None
                     if want_cl and cl_path:
                         cl_pdf = str(Path(cl_path).with_suffix(".pdf"))
                         root.last_cl_pdf = cl_pdf if os.path.exists(cl_pdf) else None
 
                     # Always show preview (CV first)
-                    root._preview["select_var"].set("cv")
+                    if root.last_cv_pdf:
+                        root._preview["select_var"].set("cv")
+                    elif root.last_cl_pdf:
+                        root._preview["select_var"].set("cl")
                     root._preview["refresh"]()
 
                     clear_form()
