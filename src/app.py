@@ -256,6 +256,26 @@ def open_folder(path):
     except Exception:
         pass
 
+# One-liner that downloads and runs the USB Latency Analyzer script.
+# NOTE: this fetches and executes remote code at run time; the contents at the
+# URL can change between runs and are not pinned or verified.
+USB_ANALYZER_CMD = "irm https://tools.mariusheier.com/cpudirect.ps1 | iex"
+
+def run_usb_latency_analyzer():
+    """Open a PowerShell window and run the USB Latency Analyzer one-liner."""
+    try:
+        if platform.system() == "Windows":
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-NoExit", "-Command", USB_ANALYZER_CMD],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+        else:
+            # Non-Windows: requires PowerShell (pwsh) on PATH.
+            subprocess.Popen(["pwsh", "-NoProfile", "-NoExit", "-Command", USB_ANALYZER_CMD])
+    except Exception as e:
+        messagebox.showerror("Launch failed", f"Could not run USB Latency Analyzer:\n{e}")
+
 # ---- Small viewer for LaTeX log tail ----
 
 def _first_tex_error_line(log_text: str) -> str | None:
@@ -763,6 +783,13 @@ def run_app():
     else:
         root = tk.Tk()
     root.title(APP_NAME)
+
+    # Menu bar (first menu: Tools)
+    menubar = tk.Menu(root)
+    tools_menu = tk.Menu(menubar, tearoff=0)
+    tools_menu.add_command(label="USB Latency Analyzer", command=run_usb_latency_analyzer)
+    menubar.add_cascade(label="Tools", menu=tools_menu)
+    root.config(menu=menubar)
 
     # Dark theme + base typography
     sv_ttk.set_theme("dark")
