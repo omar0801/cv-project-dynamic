@@ -162,3 +162,24 @@ Edit the files in `modules/` to reflect your background:
 
 > The idea: the template ships with **anonymous, reusable** sections so anyone can adopt it. Each user then edits `modules/*.tex` once, and only tailors the Summary and chosen Projects per application.
 
+---
+
+## Building a standalone `.exe` (Windows)
+
+Set `CANDIDATE_NAME` and personalise `modules/*.tex` **before** building — those files get bundled into the executable.
+
+```bat
+.venv\Scripts\activate
+pip install -r requirements.txt
+build.bat
+```
+
+The result is `dist\CVBuilder\CVBuilder.exe`. Ship the whole `CVBuilder` folder, not just the `.exe` — the `_internal` folder beside it holds `base/`, `modules/`, and the Tk runtime.
+
+Notes:
+
+* **MiKTeX is still required separately.** The app shells out to `pdflatex`, which cannot be bundled; the exe shows an error if it is not on `PATH`.
+* **Output location.** `jobs/` is created next to the `CVBuilder` folder (i.e. in `dist\`), not inside it.
+* **Adding projects after building.** `.tex` files dropped onto the running exe are copied into `_internal\modules\projects\` and persist across runs. Rebuilding replaces that folder, so keep your originals in the repo's `modules/projects/`.
+* The build runs from `app.spec`; edit that file to change the icon, name, or bundled data.
+
