@@ -171,8 +171,10 @@ Set `CANDIDATE_NAME` and personalise `modules/*.tex` **before** building — tho
 ```bat
 .venv\Scripts\activate
 pip install -r requirements.txt
-build.bat
+.\build.bat
 ```
+
+> In PowerShell the leading `.\` is required; `cmd` accepts either.
 
 The result is `dist\CVBuilder\CVBuilder.exe`. Ship the whole `CVBuilder` folder, not just the `.exe` — the `_internal` folder beside it holds `base/`, `modules/`, and the Tk runtime.
 

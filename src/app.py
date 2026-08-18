@@ -137,6 +137,28 @@ def rewrite_module_inputs_to_absolute(tex_path: str):
     except Exception:
         pass
 
+
+def rewrite_documentclass_to_name(tex_path: str):
+    r"""Reduce \documentclass{<path>/resume} to \documentclass{resume}.
+
+    The template hardcodes ../../../base/resume, which only resolves when the job
+    folder sits exactly three levels under the project root. A frozen build keeps
+    base/ inside _internal, so that path misses. TEXINPUTS already carries base/
+    (see _with_texinputs), but pdflatex only searches it for a bare class name --
+    anything containing a slash is treated as a literal path instead.
+    """
+    def strip_dirs(m):
+        opts = m.group(1) or ''
+        name = re.split(r'[\\/]', m.group(2))[-1]
+        return '\\documentclass' + opts + '{' + name + '}'
+
+    try:
+        text = Path(tex_path).read_text(encoding='utf-8')
+        text = re.sub(r'\\documentclass(\[[^\]]*\])?\{([^\}]*)\}', strip_dirs, text, count=1)
+        Path(tex_path).write_text(text, encoding='utf-8')
+    except Exception:
+        pass
+
 # LaTeX escaping
 LATEX_SPECIALS = {
     "#": r"\#",
@@ -404,6 +426,7 @@ def create_cv_for(job_folder: str, role_title: str, company_name: str):
     try:
         shutil.copy(str(template_path), str(destination_file))
         rewrite_module_inputs_to_absolute(str(destination_file))
+        rewrite_documentclass_to_name(str(destination_file))
         patch_cv_candidate_name(str(destination_file), CANDIDATE_NAME)
     except Exception as e:
         messagebox.showerror("Error", f"Could not prepare CV files:\n{e}")
